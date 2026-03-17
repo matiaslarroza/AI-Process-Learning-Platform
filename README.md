@@ -138,7 +138,16 @@ npm install
 npm run dev
 ```
 
-La app queda disponible en `http://localhost:5173`. El dev server de Vite proxea `/api/*` al backend en el puerto 8000.
+La app queda disponible en `http://localhost:5173`.
+
+Configuración opcional para apuntar a un backend remoto o evitar el proxy local:
+
+```bash
+cd apps/web
+echo "VITE_API_BASE_URL=http://localhost:8000" > .env.local
+```
+
+Si `VITE_API_BASE_URL` no está definida, el dev server de Vite sigue usando el proxy `/api/*` al backend en el puerto 8000.
 
 ## Usuarios de prueba
 
@@ -191,6 +200,12 @@ Copiar `.env.example` a `apps/api/.env` y configurar:
 | `S3_PUBLIC_URL` | URL pública del bucket | `http://localhost:9000/ai-training-assets` |
 | `CORS_ORIGINS` | Orígenes permitidos (separados por coma) | `http://localhost:5173` |
 
+Variables de frontend para Vite/Netlify:
+
+| Variable | Descripción | Default local |
+|----------|-------------|---------------|
+| `VITE_API_BASE_URL` | Base URL absoluta de la API para builds del frontend | `http://localhost:8000` |
+
 ## Switch FREE/PAID
 
 Configurar en `apps/api/.env`:
@@ -223,6 +238,98 @@ S3_SECRET_ACCESS_KEY=<tu-r2-secret-key>
 S3_BUCKET_NAME=ai-training-assets
 S3_PUBLIC_URL=https://<tu-dominio-publico-r2>
 ```
+
+Además, el bucket debe tener una política CORS que permita `PUT` desde tu frontend de Netlify y `localhost:5173` para que funcionen las uploads con presigned URLs.
+
+Ejemplo:
+
+```json
+[
+  {
+    "AllowedOrigins": [
+      "https://<tu-sitio>.netlify.app",
+      "http://localhost:5173"
+    ],
+    "AllowedMethods": ["GET", "PUT", "HEAD"],
+    "AllowedHeaders": ["Content-Type"],
+    "ExposeHeaders": ["ETag"],
+    "MaxAgeSeconds": 3600
+  }
+]
+```
+
+## Deploy recomendado
+
+Arquitectura objetivo:
+
+```text
+Netlify (apps/web) -> Railway API (apps/api Docker)
+                      -> Railway Postgres con pgvector
+                      -> Cloudflare R2
+```
+
+### Backend en Railway
+
+1. Crear un servicio nuevo apuntando a este repo.
+2. Configurar `Root Directory` como `apps/api`.
+3. Usar el `Dockerfile` dentro de `apps/api`.
+4. Definir las variables de entorno de backend.
+5. Conectar una base PostgreSQL con soporte `pgvector`.
+6. Ejecutar `alembic upgrade head`.
+7. Opcional: correr `python seed.py` si querés datos demo.
+
+Variables mínimas recomendadas en Railway:
+
+```env
+DATABASE_URL=postgresql+asyncpg://...
+JWT_SECRET_KEY=<secret-largo>
+AI_PROFILE=PAID
+OPENAI_API_KEY=sk-...
+S3_ENDPOINT_URL=https://<account-id>.r2.cloudflarestorage.com
+S3_ACCESS_KEY_ID=<r2-access-key>
+S3_SECRET_ACCESS_KEY=<r2-secret-key>
+S3_BUCKET_NAME=ai-training-assets
+S3_PUBLIC_URL=https://<tu-dominio-publico-r2>
+CORS_ORIGINS=https://<tu-sitio>.netlify.app,http://localhost:5173
+```
+
+Smoke tests mínimos después del deploy:
+
+```bash
+curl https://<tu-api>.up.railway.app/health
+```
+
+Verificar además:
+
+- login con un usuario válido
+- `POST /uploads/presign`
+- upload real al bucket R2
+- creación de ProcedureVersion con source asset
+- cambio de `source_processing_status` hasta `READY`
+
+Nota operativa: en esta fase los jobs largos siguen corriendo inline dentro del proceso web usando `asyncio.create_task(...)`. Es suficiente para un MVP con una sola réplica, pero un restart del contenedor puede interrumpir trabajos en vuelo.
+
+### Frontend en Netlify
+
+1. Crear un sitio nuevo desde el mismo repo.
+2. Configurar `Base directory` como `apps/web`.
+3. Usar `npm run build` como build command.
+4. Usar `apps/web/dist` como publish directory.
+5. Definir `VITE_API_BASE_URL=https://<tu-api>.up.railway.app`.
+6. Publicar.
+
+El archivo `netlify.toml` ya deja configurado el rewrite SPA a `index.html`, necesario porque la app usa `BrowserRouter`.
+
+### Checklist de provisión
+
+- Railway API creada desde `apps/api`
+- Railway Postgres creada con soporte `vector`
+- `alembic upgrade head` ejecutado sin errores
+- bucket `ai-training-assets` creado en R2
+- CORS del bucket habilitado para Netlify y localhost
+- variables de Railway cargadas
+- variable `VITE_API_BASE_URL` cargada en Netlify
+- `CORS_ORIGINS` del backend incluye el dominio real del frontend
 
 ## API endpoints principales
 
