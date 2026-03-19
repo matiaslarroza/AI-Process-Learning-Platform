@@ -94,7 +94,7 @@ async def list_roles(db: AsyncSession = Depends(get_db)):
         (
             await db.execute(
                 select(Role)
-                .order_by(Role.created_at.desc())
+                .order_by(Role.updated_at.desc())
                 .options(
                     selectinload(Role.task_links)
                     .selectinload(RoleTaskLink.task)
@@ -148,6 +148,7 @@ async def list_user_role_assignments(db: AsyncSession = Depends(get_db)):
             created_at=item.created_at,
         )
         for item in assignments
+        if item.role is not None and item.user is not None
     ]
 
 
@@ -364,6 +365,16 @@ async def delete_role(
     incidents = list((await db.execute(select(Incident).where(Incident.role_id == role_id))).scalars().all())
     for incident in incidents:
         incident.role_id = None
+
+    assignments = list(
+        (await db.execute(select(UserRoleAssignment).where(UserRoleAssignment.role_id == role_id))).scalars().all()
+    )
+    for assignment in assignments:
+        await db.delete(assignment)
+
+    task_links = list((await db.execute(select(RoleTaskLink).where(RoleTaskLink.role_id == role_id))).scalars().all())
+    for link in task_links:
+        await db.delete(link)
 
     await db.delete(role)
     await db.commit()
