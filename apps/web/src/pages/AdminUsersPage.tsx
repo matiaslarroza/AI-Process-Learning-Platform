@@ -56,12 +56,12 @@ export default function AdminUsersPage() {
           <p className="mt-3 text-sm font-medium text-gray-600">No hay usuarios registrados</p>
         </div>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="space-y-4">
           {users.map((user) => (
             <Link
               key={user.id}
               to={`/users/${user.id}`}
-              className="rounded-2xl border border-gray-200 bg-white p-5 transition hover:-translate-y-0.5 hover:shadow-md"
+              className="block rounded-2xl border border-gray-200 bg-white p-5 transition hover:-translate-y-0.5 hover:shadow-md"
             >
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
